@@ -1,218 +1,55 @@
-<!-- Copyright 2022 JD Co.
+# 数据科学基础大作业
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this project except in compliance with the License.
-You may obtain a copy of the License at
+基于OxyGent框架实现的多智能体系统。
 
-    http://www.apache.org/licenses/LICENSE-2.0
+## 项目概述
 
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License. -->
+“京东多智能体挑战赛”旨在推动人工智能（Artificial Intelligence, AI）技术在实际生产与生活场景中的应用创新，探索多智能体在复杂业务场景下的协同决策能力。赛题要求参赛者基于京东零售开源的多智能体（Multi-Agent）协作框架OxyGent，构建高效协作的多智能体系统，以应对现实环境中的不确定性和多目标优化问题。
 
-[English](./README.md) | [中文](./README_zh.md)
+## 赛题任务
 
+- **竞赛评测方式**：本次竞赛采用公开验证集（Validation Set）和私有测试集（Test Set）相结合的评测方式，确保模型调优的科学性与最终能力的公正评估。
+- **任务体系设计**：为全面考察多智能体系统的综合能力，赛题设计了分级任务体系，并覆盖多种实际应用场景。
 
-<p align="center">
-  <a href="https://github.com/jd-opensource/OxyGent/pulls">
-    <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square" alt="PRs Welcome">
-  </a>
-  <a href="https://github.com/jd-opensource/OxyGent/blob/v4/LICENSE">
-    <img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="license"/>
-  </a>
-  <a href="https://pypi.org/project/oxygent/">
-    <img src="https://img.shields.io/pypi/v/oxygent.svg?logo=pypi&logoColor=white" alt="pip"/>
-  </a>
+### 1. 分级任务体系
 
-<html>
-    <h2 align="center">
-      <img src="https://storage.jd.com/ai-gateway-routing/prod_data/oxygent_github_images/banner.jpg" width="1256"/>
-    </h2>
-    <h3 align="center">
-      An advanced Python framework that empowers developers to quickly build production-ready intelligent systems. 
-    </h3>
-    <h3 align="center">
-      Visit our website:
-      <a href="http://oxygent.jd.com">OxyGent</a>
-    </h3>
-</html>
+- **级别1（基础）**：要求智能体依托大语言模型（LLM）或基础工具，完成基本推理与信息处理任务。
+- **级别2（进阶）**：要求智能体能够准确调用多类工具，并整合多源信息，提升任务完成的准确性和效率。
+- **级别3（复杂）**：要求智能体实现复杂的多步规划、深度推理及高效协作，解决更具挑战性的实际问题。
 
-## 1. Project Overview
-**OxyGent** is an open-source framework that unifies tools, models, and agents into modular Oxy. Empowering developers with transparent, end-to-end pipelines, OxyGent makes building, running, and evolving multi-agent systems seamless and infinitely extensible.
+### 2. 任务类别及应用场景
 
-## 2. Core Features
-🏎️ **Efficient Development**
-- OxyGent is a modular multi-agent framework that lets you build, deploy, and evolve AI teams with unprecedented efficiency. Its standardized Oxy components snap together like LEGO bricks, enabling rapid assembly of agents while supporting hot-swapping and cross-scenario reuse - all through clean Python interfaces without messy configs.
+- **多模态内容理解**：精准解析文本、图像、音频、PDF文档、表格及网页等多模态信息，实现商品详情页图文、用户评论、视频内容的深度理解与结构化信息提取。
+- **复杂信息检索**：智能体自主操作浏览器，进行高效、精准的信息搜索，整合多源数据，完成语义提炼与知识聚合，适用于用户评论分析、商品属性比对等复杂检索任务。
+- **逻辑推理**：针对如促销策略制定、供应链调度优化等复杂任务，智能体需进行多步逻辑推理与因果分析，生成可靠决策方案或解决路径。
+- **代码生成与执行**：动态生成代码以操作系统文件、处理数据集、完成数学计算及算法实现，支持如销售数据分析等实际应用场景。
+- **终端交互与执行**：智能体可执行系统命令及调用外部工具，实现自动化流程控制、任务调度与环境交互，广泛应用于京东电商场景下的自动化运营流程等任务。
 
-🤝 **Intelligent Collaboration**
-- The framework supercharges collaboration with dynamic planning paradigms, where agents intelligently decompose tasks, negotiate solutions, and adapt to changes in real-time. Unlike rigid workflow systems, OxyGent's agents handle emergent challenges naturally while maintaining full auditability of every decision.
+## 数据说明
 
-🕸️ **Elastic Architecture**
-- Under the hood, an elastic architecture supports any agent topology- from simple ReAct to complex hybrid planning patterns. Automated dependency mapping and visual debugging tools make it easy to optimize performance across distributed systems.
+### 1. 核心文件清单
 
-🔁 **Continuous Evolution**
-- Every interaction becomes a learning opportunity - thanks to built-in evaluation engines that auto-generate training data. Your agents continuously improve through knowledge feedback loops while maintaining full transparency.
+| 文件名                | 作用描述                                                     | 关键说明                            |
+| :-------------------- | :----------------------------------------------------------- | :---------------------------------- |
+| `data.jsonl`          | 主数据文件（分验证集/测试集版本），每行存储1个JSON对象，包含任务核心信息 | 验证集包含 `answer` 与 `steps` 字段 |
+| `desensitize_data.py` | Python脱敏脚本                                               | 仅处理 `local_es_data` 目录数据     |
 
-📈 **Scalability**
-- Scaling follows Metcalfe's Law- OxyGent's distributed scheduler enables linear cost growth while delivering exponential gains in collaborative intelligence. The system effortlessly handles domain-wide optimization and real-time decision making at any scale.
+### 2. 数据字段详解
 
-The latest version of OxyGent (July 15, 2025) in the [GAIA](https://huggingface.co/spaces/gaia-benchmark/leaderboard) get 59.14 points, and current top opensource system OWL gets 60.8 points.
+| 字段名称    | 数据类型     | 描述                                                   | 存在范围     |
+| :---------- | :----------- | :----------------------------------------------------- | :----------- |
+| `query`     | 字符串       | 待解决的任务问题                                       | 所有任务     |
+| `level`     | 字符串或数字 | 任务难度等级                                           | 所有任务     |
+| `task_id`   | 字符串       | 任务唯一标识符（如 `task_id_xxx`），用于结果匹配       | 所有任务     |
+| `file_name` | 字符串       | 可选字段，部分任务附带的关联文件名（用于匹配补充文件） | 部分任务     |
+| `answer`    | 字符串       | 任务真实答案（用于参赛者验证）                         | **仅验证集** |
+| `steps`     | 字符串       | 完成任务的预估步骤                                     | **仅验证集** |
 
-![](https://storage.jd.com/ai-gateway-routing/prod_data/oxygent_github_images/points.png)
+### 3. 数据内容与划分
 
-## 3. Framework Core Classes
-![](https://storage.jd.com/ai-gateway-routing/prod_data/oxygent_github_images/structure.png)
+数据覆盖京东电商场景及教育、金融等通用场景，包含商品详情页图文/视频、用户评论、浏览器检索信息等多源内容，用于支撑智能体多模态理解、复杂检索等核心功能，服务评论分析、供应链优化、自动化运营等场景化任务。
 
-## 4. Feature Highlight
-**For Developers**: Focus on business logic without reinventing the wheel.
-
-**For Enterprises**: Replace siloed AI systems with a unified framework, reducing communication overhead.
-
-**For Users**: Experience seamless teamwork from an intelligent agent ecosystem.
-
-## 5. Quick Start
-### Step 1: Create and activate a python environment
-- Method 1: conda
-   ```bash
-   conda create -n oxy_env python==3.10
-   conda activate oxy_env
-   ```
-- Method 2: uv
-   ```bash
-   curl -LsSf https://astral.sh/uv/install.sh | sh
-   uv python install 3.10 
-   uv venv .venv --python 3.10
-   source .venv/bin/activate
-   ```
-### Step 2: Install the required python package
-- Method 1: conda
-   ```bash
-   pip install oxygent
-   ```
-- Method 2: uv
-   ```bash
-   uv pip install oxygent
-   ```
-- Method 3: set develop environment
-   ```bash
-   git clone https://github.com/jd-opensource/OxyGent.git
-   cd OxyGent
-   pip install -r requirements.txt # or in uv
-   brew install coreutils # maybe essential
-   ```
-### Step 3: Node.js Environment (if using MCP)
-- Download and install **[Node.js](https://nodejs.org)**
-
-### Step 4: Write a sample python script
-- demo.py
-   ```python
-   import os
-   from oxygent import MAS, Config, oxy, preset_tools
-
-   Config.set_agent_llm_model("default_llm")
-
-   oxy_space = [
-      oxy.HttpLLM(
-         name="default_llm",
-         api_key=os.getenv("DEFAULT_LLM_API_KEY"),
-         base_url=os.getenv("DEFAULT_LLM_BASE_URL"),
-         model_name=os.getenv("DEFAULT_LLM_MODEL_NAME"),
-      ),
-      preset_tools.time_tools,
-      oxy.ReActAgent(
-         name="time_agent",
-         desc="A tool that can query the time",
-         tools=["time_tools"],
-      ),
-      preset_tools.file_tools,
-      oxy.ReActAgent(
-         name="file_agent",
-         desc="A tool that can operate the file system",
-         tools=["file_tools"],
-      ),
-      preset_tools.math_tools,
-      oxy.ReActAgent(
-         name="math_agent",
-         desc="A tool that can perform mathematical calculations.",
-         tools=["math_tools"],
-      ),
-      oxy.ReActAgent(
-         is_master=True,
-         name="master_agent",
-         sub_agents=["time_agent", "file_agent", "math_agent"],
-      ),
-   ]
-
-   async def main():
-      async with MAS(oxy_space=oxy_space) as mas:
-         await mas.start_web_service(
-            first_query="What time is it now? Please save it into time.txt."
-         )
-
-   if __name__ == "__main__":
-      import asyncio
-      asyncio.run(main())
-   ```
-
-### Step 5: Set Environment Variables
-- Method 1: Declare in terminal
-   ```bash
-   export DEFAULT_LLM_API_KEY="your_api_key"
-   export DEFAULT_LLM_BASE_URL="your_base_url"
-   export DEFAULT_LLM_MODEL_NAME="your_model_name"  
-   ```
-- Method 2: Create a .env file
-   ```bash
-   DEFAULT_LLM_API_KEY="your_api_key"
-   DEFAULT_LLM_BASE_URL="your_base_url"
-   DEFAULT_LLM_MODEL_NAME="your_model_name"
-   ```
-### Step 6: Run the example
-- Start the multi-agent system
-   ```bash
-   python demo.py
-   ```
-### Step 7: View the output
-- ![](https://storage.jd.com/ai-gateway-routing/prod_data/oxygent_github_images/vision.png)
-
-## 6. Contributing
-There are several ways you can contribute to OxyGent:
-
-1. Reporting Issues (Bugs & Errors)
-2. Suggesting Enhancements
-3. Improving Documentation
-    - Fork the repository
-    - Add your view in document
-    - Send your pull request
-4. Writing Code
-    - Fork the repository
-    - Create a new branch
-    - Add your feature or improvement
-    - Send your pull request
-
-We appreciate all kinds of contributions! 🎉🎉🎉
-If you have problems about development, please check our document: * **[Document](http://oxygent.jd.com/docs/)**
-
-## 7. Community & Support
-If you encounter any issues along the way, you are welcomed to submit reproducible steps and log snippets in the project's Issues area, or contact the OxyGent Core team directly via your internal Slack.
-
-Welcome to contact us:
-
-<div align="center">
-  <img src="https://pfst.cf2.poecdn.net/base/image/b1e96084336a823af7835f4fe418ff49da6379570f0c32898de1ffe50304d564?w=1760&h=2085&pmaid=425510216" alt="contact" width="50%" height="50%">
-</div>
-
-
-## 8. About the Contributors
-Thanks to all the following [developers](https://github.com/jd-opensource/OxyGent/graphs/contributors) who have contributed to OxyGent.
-<a href="https://github.com/jd-opensource/OxyGent/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=jd-opensource/OxyGent" />
-</a>
-
-## 9. License
-[Apache License]( ./LICENSE.md)
-
-#### OxyGent is provided by Oxygen JD.com 
-#### Thanks for your Contributions!
+| 数据集类型 | 样本数量 | 核心用途               | 关键差异                   |
+| :--------- | :------- | :--------------------- | :------------------------- |
+| 验证集     | 100条    | 效果验证、多智能体调优 | 含 `answer` / `steps` 字段 |
+| 测试集     | 200条    | 最终评估、竞赛排名     | 无 `answer` / `steps` 字段 |
