@@ -1,23 +1,22 @@
 import argparse
 import asyncio
 import json
+import base64
 import os, sys
 from pathlib import Path
 
 from dotenv import load_dotenv
 from typing import Dict, List
 
+# 导入提示词配置
+from prompts_config import get_agent_prompt, MASTER_AGENT_PROMPT, MULTIMODAL_AGENT_PROMPT, TIME_AGENT_PROMPT, FILE_AGENT_PROMPT, MATH_AGENT_PROMPT, BROWSER_AGENT_PROMPT
+
 # OxyGent 入口
-from oxygent import MAS, Config, oxy, preset_tools
+from oxygent import MAS, Config, oxy, preset_tools, OxyRequest
 
-"""
-{"task_id":"d88d3b99-2728-4bd2-9708-8c2637e7a7c4",
-"query":"根据pdf内容回答以下问题，假设用户在秒送下单了510元的商品，门店选择了自送模式，最后在超时15个小时的情况下才送达客户，问京东会扣除门店多少钱？输出数值",
-"level":"2","file_name":"['hqwqa3.pdf']","answer":"10","steps":"1. 识别pdf中关于门店自送模式的违约条例2.确认超时时间低于24小时且高于60分钟，处罚每单10元。"}
-"""
+DEFAULT_QUERY = "https://item.jd.com/100086113628.html 中的商品的商品编号是多少？"
 
-DEFAULT_QUERY = "根据pdf内容回答以下问题，假设用户在秒送下单了510元的商品，门店选择了自送模式，最后在超时15个小时的情况下才送达客户，问京东会扣除门店多少钱？输出数值。"
-
+script_path = Path(__file__).parent
 
 # -----------------------------
 # 配置与环境
@@ -34,12 +33,26 @@ def setup_env() -> None:
     # DEFAULT_LLM_MODEL_NAME="
 	pass
 
+# 将文件转为 Base64 编码
+def file_to_base64(file_path):
+    with open(file_path, "rb") as f:
+        return base64.b64encode(f.read()).decode("utf-8")
+
 def save_results(results: List[Dict], output_path: str):
     """保存结果到 JSONL 文件"""
     with open(output_path, "w", encoding="utf-8") as f:
         for result in results:
             f.write(json.dumps(result, ensure_ascii=False) + "\n")
     print(f"✓ 结果已保存到: {output_path}")
+
+async def check_tool_permisssion(mas, oxy_space):
+	"""检查是否有工具权限"""
+	if "browser_agent" in mas.oxy_name_to_oxy:
+		browser_agent = mas.oxy_name_to_oxy["browser_agent"]
+		# 确保 run_python_code 在权限列表中
+		if "run_python_code" not in browser_agent.permitted_tool_name_list:
+			browser_agent.add_permitted_tool("run_python_code")
+			print("✓ 已手动添加 run_python_code 权限到 browser_agent")
 
 
 def build_oxy_space() -> list:
@@ -70,31 +83,29 @@ def build_oxy_space() -> list:
 		name="time_agent",
 		desc="查询时间、日期与时间处理相关能力",
 		tools=["time_tools"],
+		prompt=TIME_AGENT_PROMPT,
 	)
 	file_agent = oxy.ReActAgent(
 		name="file_agent",
 		desc="进行本地文件系统读写与管理",
 		tools=["file_tools"],
+		prompt=FILE_AGENT_PROMPT,
 	)
 	math_agent = oxy.ReActAgent(
 		name="math_agent",
 		desc="执行数学计算、表达式求值、表格类数据计算",
 		tools=["math_tools"],
+		prompt=MATH_AGENT_PROMPT,
 	)
 
-	# 新增：为多模态工具创建一个专属智能体
-	multimodal_agent = oxy.ReActAgent(
-		name="multimodal_agent",
-		desc="读取PDF和图片中的文本内容",
-		tools=["multimodal_tools"],
-	)
-
+	# 主智能体
 	master_agent = oxy.ReActAgent(
 		is_master=True,
 		name="master_agent",
 		desc="多工具编排与子智能体调度的总控智能体",
 		# 授权：将 multimodal_agent 添加到主智能体的可调度列表
-		sub_agents=["time_agent", "file_agent", "math_agent", "multimodal_agent"],
+		sub_agents=["time_agent", "file_agent", "math_agent"],
+		prompt=MASTER_AGENT_PROMPT,
 	)
 
 	# 预设工具实例
@@ -102,8 +113,9 @@ def build_oxy_space() -> list:
 		preset_tools.time_tools,
 		preset_tools.file_tools,
 		preset_tools.math_tools,
-		# 注册：将 multimodal_tools 添加到工具列表
 		preset_tools.multimodal_tools,
+		preset_tools.python_tools,
+		preset_tools.string_tools,
 	]
 
 	# 后续五个任务的扩展挂点（示例占位，贡献者可在此处追加）
@@ -114,35 +126,98 @@ def build_oxy_space() -> list:
 	# 	tools=["browser_tools", "retrieve_tools"],
 	# )
 	# master_agent.sub_agents.append("advanced_retrieval_agent")
+		# 多模态智能体
+	multimodal_agent = oxy.ReActAgent(
+		name="multimodal_agent",
+		desc="读取PDF和图片中的文本内容",
+		tools=["multimodal_tools"],
+		prompt=MULTIMODAL_AGENT_PROMPT,
+	)
+	master_agent.sub_agents.append("multimodal_agent")
+
+	browser_server_dir = script_path / "mcp_servers"
+	browser_tools = oxy.StdioMCPClient(
+                    name="browser_tools",
+                    params={
+                        "command": "uv",
+                        "args": ["--directory", str(browser_server_dir), "run", "browser/server.py"],
+                    },
+                    category="tool",
+                    timeout=120,
+                    retries=2,
+                    semaphore=2,
+                )
+	# 浏览器智能体
+	browser_agent = oxy.ReActAgent(
+		name="browser_agent",
+		desc="Browser automation agent for web operations and information extraction",
+		tools=["browser_tools", "python_tools", "file_tools", "math_tools", "string_tools"],
+		prompt=BROWSER_AGENT_PROMPT,
+		max_react_rounds=50,  # 增加轮数以确保有足够机会完成任务
+		timeout=600,  # 增加超时时间到10分钟
+		retries=2,
+		semaphore=2,
+		is_retain_subagent_in_toolset=False,  # 确保子智能体可以访问工具
+	)
+
+	master_agent.sub_agents.append("browser_agent")
 
 	# 注册：将所有组件添加到 oxy_space
-	oxy_space = [llm, *tools, time_agent, file_agent, math_agent, multimodal_agent, master_agent]
+	oxy_space = [llm, *tools, time_agent, file_agent, math_agent, multimodal_agent, master_agent, browser_agent, browser_tools]
 	return oxy_space
 
 
 # -----------------------------
 # 运行模式
 # -----------------------------
-async def run_web(oxy_space: list, first_query: str | None) -> None:
+async def run_web(mas: MAS, oxy_space: list, first_query: str | None) -> None:
 	"""
 	启动 Web + SSE 服务，默认展示一个 first_query，便于前端联调与演示。
 	"""
-	async with MAS(oxy_space=oxy_space) as mas:
-		await mas.start_web_service(first_query=first_query or "")
+	await mas.start_web_service(first_query=first_query or "")
 
 
-async def run_cli(oxy_space: list, query: str | None, file_path: str | None) -> None:
-	"""
-	CLI 模式：若提供 query 则直接问答一轮；否则进入交互式 REPL。
-	"""
-	async with MAS(oxy_space=oxy_space) as mas:
-		if query:
-			if file_path:
-				query += f" 相关文件路径: {file_path}"
-			oxy_response = await mas.chat_with_agent(payload={"query": query})
-			print(oxy_response.output)
-		else:
-			await mas.start_cli_mode()
+async def run_single_query(mas: MAS, oxy_space: list, query: str | None, file_path: str | None) -> None:
+	print(f"\n{'='*60}")
+	print("单问题问答模式")
+	print(f"问题: {query}")
+	print(f"{'='*60}\n")
+	try:			
+		# 创建请求
+		oxy_request = OxyRequest(
+			callee="master_agent",
+			arguments={"query": query},
+			caller_category="user",
+		)
+		oxy_request.set_mas(mas)
+		
+		# 使用MAS的chat_with_agent方法，它能更好地处理子智能体调用链
+		oxy_response = await mas.chat_with_agent(payload={"query": query})
+		
+		# 提取答案
+		answer = oxy_response.output.strip()
+		
+		# 如果答案包含解释，尝试提取纯数值（针对"仅输出数值"的要求）
+		if "仅输出数值" in query or "仅需输出数值" in query or "仅输出数字" in query:
+			import re
+			# 尝试提取数值
+			numbers = re.findall(r'-?\d+\.?\d*', answer)
+			if numbers:
+				# 取最后一个数值（通常是最终答案）
+				answer = numbers[-1]
+		
+		print(f"\n{'='*60}")
+		print("✓ 处理完成")
+		print(f"{'='*60}")
+		print(f"\n答案: {answer}\n")
+		
+		return answer
+
+	except Exception as e:
+		print(f"\n✗ 处理失败: {str(e)}")
+		import traceback
+		traceback.print_exc()
+		return ""
 
 
 async def run_batch(oxy_space: list, data_path: str, return_trace_id: bool) -> None:
@@ -189,16 +264,15 @@ async def run_batch(oxy_space: list, data_path: str, return_trace_id: bool) -> N
 # -----------------------------
 # 最小可运行 Demo（单轮）
 # -----------------------------
-async def run_demo(oxy_space: list) -> None:
+async def run_demo(mas: MAS, oxy_space: list) -> None:
 	"""
 	最小可运行示例：
 	- 询问当前时间并保存到 time.txt
 	- 展示工具调用与结果消息在 ES/Redis 中的完整链路（如已启用）
 	"""
 	first_query = "What time is it now? Please save it into time.txt."
-	async with MAS(oxy_space=oxy_space) as mas:
-		oxy_response = await mas.chat_with_agent(payload={"query": first_query})
-		print(oxy_response.output)
+	oxy_response = await mas.chat_with_agent(payload={"query": first_query})
+	print(oxy_response.output)
 
 
 # -----------------------------
@@ -208,15 +282,15 @@ def build_parser() -> argparse.ArgumentParser:
 	parser = argparse.ArgumentParser(description="OxyGent-datasci 主程序")
 	parser.add_argument(
 		"--mode",
-		choices=["web", "cli", "batch", "demo"],
-		default="cli",
-		help="运行模式：web/cli/batch/demo",
+		choices=["web", "single", "batch", "demo"],
+		default="single",
+		help="运行模式：web/single/batch/demo",
 	)
 	parser.add_argument(
 		"--query",
 		type=str,
 		default=DEFAULT_QUERY,
-		help="单次查询（在 cli 模式有效；若缺省则进入 REPL）",
+		help="单次查询（在 single 模式有效；若缺省则进入 REPL）",
 	)
 	parser.add_argument(
 		"--first-query",
@@ -251,17 +325,20 @@ async def async_main() -> None:
 	parser = build_parser()
 	args = parser.parse_args()
 
-	if args.mode == "web":
-		await run_web(oxy_space, args.first_query)
-	elif args.mode == "cli":
-		await run_cli(oxy_space, args.query, args.file_path)
-	elif args.mode == "batch":
-		if not args.data:
-			raise SystemExit("batch 模式需要提供 --data 路径（.jsonl 或 .json）")
-		await run_batch(oxy_space, args.data, args.return_trace_id)
-	else:
-		# demo
-		await run_demo(oxy_space)
+	async with MAS(oxy_space=oxy_space) as mas:
+		await asyncio.sleep(1.0)  # 给工具初始化更多时间
+		await check_tool_permisssion(mas, oxy_space)
+		if args.mode == "web":
+			await run_web(mas, oxy_space, args.first_query)
+		elif args.mode == "single":
+			await run_single_query(mas, oxy_space, args.query, args.file_path)
+		elif args.mode == "batch":
+			if not args.data:
+				raise SystemExit("batch 模式需要提供 --data 路径（.jsonl 或 .json）")
+			await run_batch(mas, oxy_space, args.data, args.return_trace_id)
+		else:
+			# demo
+			await run_demo(mas, oxy_space)
 
 
 def main() -> None:
