@@ -10,7 +10,13 @@ from typing import Dict, List
 # OxyGent 入口
 from oxygent import MAS, Config, oxy, preset_tools
 
-DEFAULT_QUERY = ""
+"""
+{"task_id":"d88d3b99-2728-4bd2-9708-8c2637e7a7c4",
+"query":"根据pdf内容回答以下问题，假设用户在秒送下单了510元的商品，门店选择了自送模式，最后在超时15个小时的情况下才送达客户，问京东会扣除门店多少钱？输出数值",
+"level":"2","file_name":"['hqwqa3.pdf']","answer":"10","steps":"1. 识别pdf中关于门店自送模式的违约条例2.确认超时时间低于24小时且高于60分钟，处罚每单10元。"}
+"""
+
+DEFAULT_QUERY = "根据pdf内容回答以下问题，假设用户在秒送下单了510元的商品，门店选择了自送模式，最后在超时15个小时的情况下才送达客户，问京东会扣除门店多少钱？输出数值。"
 
 
 # -----------------------------
@@ -76,11 +82,19 @@ def build_oxy_space() -> list:
 		tools=["math_tools"],
 	)
 
+	# 新增：为多模态工具创建一个专属智能体
+	multimodal_agent = oxy.ReActAgent(
+		name="multimodal_agent",
+		desc="读取PDF和图片中的文本内容",
+		tools=["multimodal_tools"],
+	)
+
 	master_agent = oxy.ReActAgent(
 		is_master=True,
 		name="master_agent",
 		desc="多工具编排与子智能体调度的总控智能体",
-		sub_agents=["time_agent", "file_agent", "math_agent"],
+		# 授权：将 multimodal_agent 添加到主智能体的可调度列表
+		sub_agents=["time_agent", "file_agent", "math_agent", "multimodal_agent"],
 	)
 
 	# 预设工具实例
@@ -88,6 +102,8 @@ def build_oxy_space() -> list:
 		preset_tools.time_tools,
 		preset_tools.file_tools,
 		preset_tools.math_tools,
+		# 注册：将 multimodal_tools 添加到工具列表
+		preset_tools.multimodal_tools,
 	]
 
 	# 后续五个任务的扩展挂点（示例占位，贡献者可在此处追加）
@@ -99,7 +115,8 @@ def build_oxy_space() -> list:
 	# )
 	# master_agent.sub_agents.append("advanced_retrieval_agent")
 
-	oxy_space = [llm, *tools, time_agent, file_agent, math_agent, master_agent]
+	# 注册：将所有组件添加到 oxy_space
+	oxy_space = [llm, *tools, time_agent, file_agent, math_agent, multimodal_agent, master_agent]
 	return oxy_space
 
 
@@ -114,12 +131,14 @@ async def run_web(oxy_space: list, first_query: str | None) -> None:
 		await mas.start_web_service(first_query=first_query or "")
 
 
-async def run_cli(oxy_space: list, query: str | None) -> None:
+async def run_cli(oxy_space: list, query: str | None, file_path: str | None) -> None:
 	"""
 	CLI 模式：若提供 query 则直接问答一轮；否则进入交互式 REPL。
 	"""
 	async with MAS(oxy_space=oxy_space) as mas:
 		if query:
+			if file_path:
+				query += f" 相关文件路径: {file_path}"
 			oxy_response = await mas.chat_with_agent(payload={"query": query})
 			print(oxy_response.output)
 		else:
@@ -190,13 +209,13 @@ def build_parser() -> argparse.ArgumentParser:
 	parser.add_argument(
 		"--mode",
 		choices=["web", "cli", "batch", "demo"],
-		default="demo",
+		default="cli",
 		help="运行模式：web/cli/batch/demo",
 	)
 	parser.add_argument(
 		"--query",
 		type=str,
-		default=None,
+		default=DEFAULT_QUERY,
 		help="单次查询（在 cli 模式有效；若缺省则进入 REPL）",
 	)
 	parser.add_argument(
@@ -216,6 +235,12 @@ def build_parser() -> argparse.ArgumentParser:
 		action="store_true",
 		help="批处理是否返回 trace_id（用于离线审计）",
 	)
+	parser.add_argument(
+		"--file_path",
+		type=str,
+		default=None,
+		help="文件路径",
+	)
 	return parser
 
 
@@ -229,7 +254,7 @@ async def async_main() -> None:
 	if args.mode == "web":
 		await run_web(oxy_space, args.first_query)
 	elif args.mode == "cli":
-		await run_cli(oxy_space, args.query)
+		await run_cli(oxy_space, args.query, args.file_path)
 	elif args.mode == "batch":
 		if not args.data:
 			raise SystemExit("batch 模式需要提供 --data 路径（.jsonl 或 .json）")
