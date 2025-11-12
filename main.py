@@ -9,12 +9,13 @@ from dotenv import load_dotenv
 from typing import Dict, List
 
 # 导入提示词配置
-from prompts_config import get_agent_prompt, MASTER_AGENT_PROMPT, MULTIMODAL_AGENT_PROMPT, TIME_AGENT_PROMPT, FILE_AGENT_PROMPT, MATH_AGENT_PROMPT, BROWSER_AGENT_PROMPT
+from prompts_config import get_agent_prompt, MASTER_AGENT_PROMPT, MULTIMODAL_AGENT_PROMPT, TIME_AGENT_PROMPT, FILE_AGENT_PROMPT, MATH_AGENT_PROMPT, BROWSER_AGENT_PROMPT, REASON_AGENT_PROMPT, PLAN_AGENT_PROMPT
 
 # OxyGent 入口
 from oxygent import MAS, Config, oxy, preset_tools, OxyRequest
 
-DEFAULT_QUERY = "https://item.jd.com/100086113628.html 中的商品的商品编号是多少？"
+DEFAULT_QUERY = "https://item.jd.com/5760789.html 中的商品是否有透明窗，用是或否来回答"
+
 
 script_path = Path(__file__).parent
 
@@ -126,7 +127,35 @@ def build_oxy_space() -> list:
 	# 	tools=["browser_tools", "retrieve_tools"],
 	# )
 	# master_agent.sub_agents.append("advanced_retrieval_agent")
-		# 多模态智能体
+	# 任务规划智能体
+	plan_agent = oxy.ReActAgent(
+		name="plan_agent",
+		desc="任务规划与调度专家，负责复杂问题的任务拆分和执行规划",
+		tools=["string_tools", "python_tools"],
+		prompt=PLAN_AGENT_PROMPT,
+		max_react_rounds=10,
+		timeout=60,
+		retries=2,
+		semaphore=2,
+		is_retain_subagent_in_toolset=False,
+	)
+	# 将任务规划智能体添加到主智能体的子智能体列表
+	master_agent.sub_agents.append("plan_agent")
+		# 推理智能体
+	reason_agent = oxy.ReActAgent(
+		name="reason_agent",
+		desc="复杂逻辑推理与问题求解专家",
+		tools=["math_tools", "python_tools", "string_tools", "file_tools"],
+		prompt=REASON_AGENT_PROMPT,
+		max_react_rounds=4,  # 增加轮数以支持复杂推理
+		timeout=100,  # 设置适当的超时时间
+		retries=2,
+		semaphore=2,
+		is_retain_subagent_in_toolset=False,
+	)
+	master_agent.sub_agents.append("reason_agent")
+
+	# 多模态智能体
 	multimodal_agent = oxy.ReActAgent(
 		name="multimodal_agent",
 		desc="读取PDF和图片中的文本内容",
@@ -135,6 +164,7 @@ def build_oxy_space() -> list:
 	)
 	master_agent.sub_agents.append("multimodal_agent")
 
+	# 浏览器智能体工具
 	browser_server_dir = script_path / "mcp_servers"
 	browser_tools = oxy.StdioMCPClient(
                     name="browser_tools",
@@ -153,8 +183,8 @@ def build_oxy_space() -> list:
 		desc="Browser automation agent for web operations and information extraction",
 		tools=["browser_tools", "python_tools", "file_tools", "math_tools", "string_tools"],
 		prompt=BROWSER_AGENT_PROMPT,
-		max_react_rounds=50,  # 增加轮数以确保有足够机会完成任务
-		timeout=600,  # 增加超时时间到10分钟
+		max_react_rounds=2,  # 增加轮数以确保有足够机会完成任务
+		timeout=90,
 		retries=2,
 		semaphore=2,
 		is_retain_subagent_in_toolset=False,  # 确保子智能体可以访问工具
@@ -163,7 +193,7 @@ def build_oxy_space() -> list:
 	master_agent.sub_agents.append("browser_agent")
 
 	# 注册：将所有组件添加到 oxy_space
-	oxy_space = [llm, *tools, time_agent, file_agent, math_agent, multimodal_agent, master_agent, browser_agent, browser_tools]
+	oxy_space = [llm, *tools, time_agent, file_agent, math_agent, reason_agent, multimodal_agent, master_agent, browser_agent, browser_tools, plan_agent]
 	return oxy_space
 
 
@@ -220,45 +250,62 @@ async def run_single_query(mas: MAS, oxy_space: list, query: str | None, file_pa
 		return ""
 
 
-async def run_batch(oxy_space: list, data_path: str, return_trace_id: bool) -> None:
+async def run_batch(mas, oxy_space: list, data_dir: str) -> None:
 	"""
-	批处理模式：从 JSONL 或 JSON 加载一组 query，执行并打印结果。
+	批处理模式：从 JSONL 或 JSON 加载一组完整的查询对象，执行并保存结果到result.jsonl。
 	输入格式支持：
-	- JSONL: 每行一个对象，字段至少包含 query
+	- JSONL: 每行一个对象，包含 task_id, query, level, file_name 等字段
 	- JSON : 列表形式的对象数组
 	"""
-	def load_queries(path: str) -> list[str]:
+	def load_query_objects(path: str) -> list[dict]:
 		p = Path(path)
 		if not p.exists():
 			raise FileNotFoundError(f"未找到数据文件: {path}")
 		if p.suffix.lower() == ".jsonl":
-			queries = []
+			query_objects = []
 			with p.open("r", encoding="utf-8") as f:
 				for line in f:
 					line = line.strip()
 					if not line:
 						continue
 					obj = json.loads(line)
-					q = obj.get("query", "")
-					if q:
-						queries.append(q)
-			return queries
+					if "query" in obj:
+						query_objects.append(obj)
+			return query_objects
 		elif p.suffix.lower() == ".json":
 			with p.open("r", encoding="utf-8") as f:
 				data = json.load(f)
-			return [item.get("query", "") for item in data if isinstance(item, dict) and item.get("query")]
+			return [item for item in data if isinstance(item, dict) and "query" in item]
 		else:
 			raise ValueError("仅支持 .jsonl 或 .json 输入文件")
 
-	queries = load_queries(data_path)
-	async with MAS(oxy_space=oxy_space) as mas:
-		results = await mas.start_batch_processing(queries, return_trace_id=return_trace_id)
-		# 控制台输出（便于流水线抓取）
+	data_path = Path(data_dir) / "data-cut.jsonl"
+	query_objects = load_query_objects(data_path)
+	results = []
+	# 逐条处理查询
+	for json_content in query_objects:
+		try:
+			# 调用mas处理当前查询
+			if json_content["file_name"]:
+				json_content["query"] = f"请读取{data_dir}/{json_content['file_name']}中的内容，然后回答问题：{json_content['query']}"
+			result = await mas.chat_with_agent(payload={"query": json_content["query"]})
+			# 将结果存储回json对象
+			json_content["answer"] = result.output.strip()
+			results.append(json_content)
+		except Exception as e:
+			# 处理可能的错误
+			json_content["answer"] = f"处理失败: {str(e)}"
+			results.append(json_content)
+
+	# 保存结果到result.jsonl文件
+	output_path = Path("result.jsonl")
+	with output_path.open("w", encoding="utf-8") as f:
 		for item in results:
-			if isinstance(item, dict):
-				print(json.dumps(item, ensure_ascii=False))
-			else:
-				print(item)
+			f.write(json.dumps(item, ensure_ascii=False) + "\n")
+
+	# 同时在控制台输出结果（便于流水线抓取）
+	for item in results:
+		print(json.dumps(item, ensure_ascii=False))
 
 
 # -----------------------------
@@ -299,15 +346,10 @@ def build_parser() -> argparse.ArgumentParser:
 		help="Web 模式首页展示的默认问题",
 	)
 	parser.add_argument(
-		"--data",
+		"--data_dir",
 		type=str,
 		default=None,
 		help="批处理输入数据路径（.jsonl 或 .json）",
-	)
-	parser.add_argument(
-		"--return-trace-id",
-		action="store_true",
-		help="批处理是否返回 trace_id（用于离线审计）",
 	)
 	parser.add_argument(
 		"--file_path",
@@ -333,9 +375,9 @@ async def async_main() -> None:
 		elif args.mode == "single":
 			await run_single_query(mas, oxy_space, args.query, args.file_path)
 		elif args.mode == "batch":
-			if not args.data:
-				raise SystemExit("batch 模式需要提供 --data 路径（.jsonl 或 .json）")
-			await run_batch(mas, oxy_space, args.data, args.return_trace_id)
+			if not args.data_dir:
+				raise SystemExit("batch 模式需要提供 --data_dir 路径（.jsonl 或 .json）")
+			await run_batch(mas, oxy_space, args.data_dir)
 		else:
 			# demo
 			await run_demo(mas, oxy_space)
