@@ -228,7 +228,6 @@ __pycache__/
 pyproject.toml*
 
 # 数据文件与日志文件
-*.jsonl
 *.log
 *.lock
 
